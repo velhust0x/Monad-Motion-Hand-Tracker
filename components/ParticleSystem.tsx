@@ -4,21 +4,19 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { GestureType } from '../types';
 
-// Increased particle count for a much denser and seamless look
-const PARTICLE_COUNT = 6000;
-const OUTER_COUNT = 4500;
-const INNER_COUNT = 1500;
+const PARTICLE_COUNT = 10000;
+const WHITE_RING_COUNT = 7000; // Tập trung phần lớn hạt vào vòng trắng chính
+const PURPLE_GLOW_COUNT = 3000;
 
 interface ParticleSystemProps {
   gesture: GestureType;
 }
 
 const ParticleSystem: React.FC<ParticleSystemProps> = ({ gesture }) => {
-  const sphereMeshRef = useRef<THREE.InstancedMesh>(null!);
-  const cubeMeshRef = useRef<THREE.InstancedMesh>(null!);
+  const purpleMeshRef = useRef<THREE.InstancedMesh>(null!);
+  const whiteMeshRef = useRef<THREE.InstancedMesh>(null!);
   const groupRef = useRef<THREE.Group>(null!);
   
-  // Reusable scratchpad variables to avoid GC thrashing (Lag prevention)
   const scratchDir = useMemo(() => new THREE.Vector3(), []);
   const tempObject = useMemo(() => new THREE.Object3D(), []);
   const tempColor = useMemo(() => new THREE.Color(), []);
@@ -26,142 +24,146 @@ const ParticleSystem: React.FC<ParticleSystemProps> = ({ gesture }) => {
   const particles = useMemo(() => {
     const data = [];
     for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const isWhite = i < WHITE_RING_COUNT;
       data.push({
-        position: new THREE.Vector3().randomDirection().multiplyScalar(Math.random() * 20),
-        velocity: new THREE.Vector3().randomDirection().multiplyScalar(0.01 + Math.random() * 0.02),
-        scale: Math.random() * 0.04 + 0.035, // Slightly smaller particles for better detail
-        type: Math.random() > 0.3 ? 'sphere' : 'cube',
+        position: new THREE.Vector3().randomDirection().multiplyScalar(20 + Math.random() * 10),
+        velocity: new THREE.Vector3().randomDirection().multiplyScalar(0.02 + Math.random() * 0.03),
+        scale: isWhite ? (Math.random() * 0.035 + 0.035) : (Math.random() * 0.03 + 0.03),
+        isWhite,
+        noiseOffset: Math.random() * 1000,
       });
     }
     return data;
   }, []);
 
+  // Tính toán hình dáng Monad chuẩn xác
   const monadPositions = useMemo(() => {
     const pos = [];
-    // Lower exponent for smoother, less 'boxy' squircle which prevents edge thinning
-    const exponent = 3.8; 
-    const angleRot = Math.PI / 4;
+    const n = 3.2; // Chỉ số n cho Squircle (Superellipse)
+    const angleRot = Math.PI / 4; // Xoay 45 độ
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
-      // Use i / PARTICLE_COUNT to ensure perfectly uniform spacing around the perimeter
-      // instead of purely random 't' which can create clusters/gaps.
-      const t = (i / (i < OUTER_COUNT ? OUTER_COUNT : INNER_COUNT)) * Math.PI * 2;
-      
-      const isOuter = i < OUTER_COUNT;
-      const baseRadius = isOuter ? 2.3 : 1.0;
-      // Tighten thickness to make the lines look 'solid'
-      const thickness = isOuter ? 0.22 : 0.12;
-      
-      const r = baseRadius + (Math.random() - 0.5) * thickness;
-      
-      const cosT = Math.cos(t);
-      const sinT = Math.sin(t);
-      
-      // Super-ellipse parametric formula
-      let rawX = Math.sign(cosT) * Math.pow(Math.abs(cosT), 2 / exponent);
-      let rawY = Math.sign(sinT) * Math.pow(Math.abs(sinT), 2 / exponent);
-      
-      // Rotation to get the Monad diamond shape
-      const x = (rawX * Math.cos(angleRot) - rawY * Math.sin(angleRot)) * r;
-      const y = (rawX * Math.sin(angleRot) + rawY * Math.cos(angleRot)) * r;
-      const z = (Math.random() - 0.5) * 0.12;
+      const p = particles[i];
+      let x, y, z;
+      let valid = false;
+      let attempts = 0;
 
-      pos.push(new THREE.Vector3(x, y, z));
+      while (!valid && attempts < 150) {
+        attempts++;
+        // Sampling trong không gian [-4, 4]
+        const tx = (Math.random() - 0.5) * 8;
+        const ty = (Math.random() - 0.5) * 8;
+        
+        // Công thức Squircle: |x|^n + |y|^n
+        const val = Math.pow(Math.abs(tx), n) + Math.pow(Math.abs(ty), n);
+        
+        if (p.isWhite) {
+          // Vòng nhẫn trắng: tạo độ dày cố định
+          if (val < Math.pow(2.8, n) && val > Math.pow(1.8, n)) {
+            x = tx; y = ty; valid = true;
+          }
+        } else {
+          // Lớp tím: nằm sát viền trong và viền ngoài để tạo glow
+          if (val < Math.pow(2.9, n) && val > Math.pow(1.7, n)) {
+            x = tx; y = ty; valid = true;
+          }
+        }
+      }
+
+      // Xoay hình thoi chuẩn Monad ban đầu
+      const rx = (x! * Math.cos(angleRot) - y! * Math.sin(angleRot));
+      const ry = (x! * Math.sin(angleRot) + y! * Math.cos(angleRot));
+      z = (Math.random() - 0.5) * 0.15; // Độ mỏng mặt phẳng
+
+      pos.push(new THREE.Vector3(rx, ry, z));
     }
     return pos;
-  }, []);
+  }, [particles]);
 
   useFrame((state) => {
     const time = state.clock.getElapsedTime();
-    let sIdx = 0;
-    let cIdx = 0;
+    let pIdx = 0;
+    let wIdx = 0;
 
     const isFist = gesture === GestureType.FIST;
     const isOpen = gesture === GestureType.OPEN;
 
-    // Smooth continuous group rotation
-    const rotationSpeed = isFist ? 0.025 : 0.006;
-    groupRef.current.rotation.z += rotationSpeed;
-    groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, isFist ? Math.sin(time * 0.4) * 0.25 : 0, 0.06);
+    // Hiệu ứng xoay tròn liên tục
+    // Tăng tốc độ xoay nhẹ khi ở trạng thái Logo để tăng tính thẩm mỹ
+    const rotationSpeed = isFist ? 0.4 : 0.2;
+    groupRef.current.rotation.z = time * rotationSpeed;
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const p = particles[i];
+      const target = monadPositions[i];
       
       if (isFist) {
-        // High responsiveness lerp for assembly
-        p.position.lerp(monadPositions[i], 0.18);
+        // Hút về logo với gia tốc mượt
+        p.position.lerp(target, 0.15);
+        // Thêm một chút nhiễu nhẹ để hạt trông như đang "sống"
+        p.position.x += Math.sin(time * 10 + p.noiseOffset) * 0.001;
+        p.position.y += Math.cos(time * 10 + p.noiseOffset) * 0.001;
       } else if (isOpen) {
-        // Explosion with normalized vector
+        // Nổ tung
         scratchDir.copy(p.position).normalize();
-        if (scratchDir.lengthSq() === 0) scratchDir.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize();
         p.position.addScaledVector(scratchDir, 0.7);
       } else {
-        // Floating idle with boundary check
-        p.position.add(p.velocity);
-        if (p.position.lengthSq() > 1024) { // 32^2
-          p.position.multiplyScalar(0.9);
+        // Trạng thái trôi tự do
+        p.position.x += Math.cos(time * 0.3 + p.noiseOffset) * 0.008 + p.velocity.x;
+        p.position.y += Math.sin(time * 0.3 + p.noiseOffset) * 0.008 + p.velocity.y;
+        p.position.z += p.velocity.z;
+
+        if (p.position.lengthSq() > 1500) {
           p.velocity.negate();
+          p.position.multiplyScalar(0.9);
         }
       }
 
       tempObject.position.copy(p.position);
-      tempObject.scale.setScalar(p.scale);
-      tempObject.rotation.x += 0.03;
-      tempObject.rotation.y += 0.03;
+      
+      // Khi khép tay, các hạt co giãn nhẹ theo nhịp tim
+      const pulse = isFist ? 1.0 + Math.sin(time * 4 + p.noiseOffset) * 0.05 : 1.0;
+      tempObject.scale.setScalar(p.scale * pulse);
       tempObject.updateMatrix();
 
-      // Premium Monad Color Palette
-      const colors = [0x836ef9, 0xa08cff, 0xffffff];
-      let colorIdx;
-      
-      if (i >= OUTER_COUNT) {
-        // Inner logo: bright white/silver for core energy
-        colorIdx = (i % 3 === 0) ? 2 : 1;
+      if (p.isWhite) {
+        whiteMeshRef.current.setMatrixAt(wIdx, tempObject.matrix);
+        tempColor.set(0xffffff);
+        whiteMeshRef.current.setColorAt(wIdx, tempColor);
+        wIdx++;
       } else {
-        // Outer logo: deep Monad purple with white highlights
-        colorIdx = (i % 8 === 0) ? 2 : (i % 2 === 0 ? 0 : 1);
-      }
-      
-      if (p.type === 'sphere') {
-        sphereMeshRef.current.setMatrixAt(sIdx, tempObject.matrix);
-        tempColor.set(colors[colorIdx]);
-        sphereMeshRef.current.setColorAt(sIdx, tempColor);
-        sIdx++;
-      } else {
-        cubeMeshRef.current.setMatrixAt(cIdx, tempObject.matrix);
-        tempColor.set(colors[colorIdx]);
-        cubeMeshRef.current.setColorAt(cIdx, tempColor);
-        cIdx++;
+        purpleMeshRef.current.setMatrixAt(pIdx, tempObject.matrix);
+        tempColor.set(0x836ef9);
+        purpleMeshRef.current.setColorAt(pIdx, tempColor);
+        pIdx++;
       }
     }
 
-    sphereMeshRef.current.instanceMatrix.needsUpdate = true;
-    cubeMeshRef.current.instanceMatrix.needsUpdate = true;
-    if (sphereMeshRef.current.instanceColor) sphereMeshRef.current.instanceColor.needsUpdate = true;
-    if (cubeMeshRef.current.instanceColor) cubeMeshRef.current.instanceColor.needsUpdate = true;
+    whiteMeshRef.current.instanceMatrix.needsUpdate = true;
+    purpleMeshRef.current.instanceMatrix.needsUpdate = true;
+    if (whiteMeshRef.current.instanceColor) whiteMeshRef.current.instanceColor.needsUpdate = true;
+    if (purpleMeshRef.current.instanceColor) purpleMeshRef.current.instanceColor.needsUpdate = true;
   });
-
-  const sphereCount = useMemo(() => particles.filter(p => p.type === 'sphere').length, [particles]);
-  const cubeCount = PARTICLE_COUNT - sphereCount;
 
   return (
     <group ref={groupRef}>
-      <instancedMesh ref={sphereMeshRef} args={[undefined, undefined, sphereCount]}>
-        <sphereGeometry args={[1, 5, 5]} />
+      <instancedMesh ref={whiteMeshRef} args={[undefined, undefined, WHITE_RING_COUNT]}>
+        <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial 
-          roughness={0.05} 
+          roughness={0.0} 
           metalness={1.0} 
-          emissive="#836ef9" 
+          emissive="#ffffff" 
           emissiveIntensity={0.8} 
         />
       </instancedMesh>
-      <instancedMesh ref={cubeMeshRef} args={[undefined, undefined, cubeCount]}>
-        <boxGeometry args={[1, 1, 1]} />
+
+      <instancedMesh ref={purpleMeshRef} args={[undefined, undefined, PURPLE_GLOW_COUNT]}>
+        <sphereGeometry args={[1, 6, 6]} />
         <meshStandardMaterial 
-          roughness={0.05} 
-          metalness={1.0} 
-          emissive="#ffffff" 
-          emissiveIntensity={0.5} 
+          roughness={0.1} 
+          metalness={0.8} 
+          emissive="#836ef9" 
+          emissiveIntensity={4.0} 
         />
       </instancedMesh>
     </group>

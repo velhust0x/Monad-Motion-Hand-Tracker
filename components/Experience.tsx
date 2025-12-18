@@ -22,14 +22,14 @@ const PostProcessing: React.FC = () => {
     const renderPass = new RenderPass(scene, camera);
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.width, size.height),
-      2.0, // Strength: Stronger for "Glowing" feel
-      0.4, // Radius: Softer glow
-      0.85 // Threshold: Lower to catch more emissive parts
+      0.8,  // Strength: Vừa đủ để lung linh
+      0.6,  // Radius: Tăng bán kính để glow tỏa rộng mềm mại
+      0.2   // Threshold: Hạ thấp threshold để màu tím lan tỏa tốt hơn, nhưng vật liệu trắng đã được giảm cường độ emissive để không bị lóa
     );
     comp.addPass(renderPass);
     comp.addPass(bloomPass);
     return comp;
-  }, [gl, scene, camera]);
+  }, [gl, scene, camera, size]);
 
   useEffect(() => {
     composer.setSize(size.width, size.height);
@@ -48,9 +48,9 @@ const Experience: React.FC<ExperienceProps> = ({ gesture, onHandUpdate }) => {
       <HandTracker onUpdate={onHandUpdate} />
       
       <Canvas
-        camera={{ position: [0, 0, 10], fov: 45 }}
+        camera={{ position: [0, 0, 10], fov: 40 }}
         gl={{ 
-          antialias: false,
+          antialias: true,
           powerPreference: 'high-performance',
           stencil: false,
           depth: true,
@@ -58,15 +58,15 @@ const Experience: React.FC<ExperienceProps> = ({ gesture, onHandUpdate }) => {
         }}
         dpr={Math.min(window.devicePixelRatio, 2)} 
         onCreated={({ gl }) => {
-          gl.setClearColor(0x000000);
+          gl.setClearColor(0x020108);
         }}
       >
-        <color attach="background" args={['#000000']} />
+        <color attach="background" args={['#010005']} />
         
-        {/* Lights for depth */}
         <ambientLight intensity={0.2} />
-        <pointLight position={[5, 5, 5]} intensity={5} color="#836ef9" />
-        <pointLight position={[-5, -5, 5]} intensity={2} color="#ffffff" />
+        {/* Ánh sáng điểm để tạo khối cho các hạt box */}
+        <pointLight position={[5, 5, 5]} intensity={5} color="#ffffff" />
+        <pointLight position={[-5, -5, 5]} intensity={10} color="#836ef9" />
         
         <ParticleSystem gesture={gesture} />
         
