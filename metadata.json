@@ -1,0 +1,7 @@
+{
+  "name": "Monad Motion Hand Tracker",
+  "description": "A high-end futuristic 3D interactive particle experience controlled by hand gestures. Celebrate Christmas with the Monad logo assembly and explosive fireworks using MediaPipe hand tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
